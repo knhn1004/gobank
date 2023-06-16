@@ -38,9 +38,6 @@ func (s *APIServer) handleAccount(w http.ResponseWriter, r *http.Request) error 
 	if r.Method == "POST" {
 		return s.handleCreateAccount(w, r)
 	}
-	if r.Method == "DELETE" {
-		return s.handleDeleteAccount(w, r)
-	}
 
 	return fmt.Errorf("unknown method %s", r.Method)
 }
@@ -54,17 +51,22 @@ func (s *APIServer) handleGetAccounts(w http.ResponseWriter, r *http.Request) er
 }
 
 func (s *APIServer) handleGetAccountById(w http.ResponseWriter, r *http.Request) error {
-	idStr := mux.Vars(r)["id"]
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		return fmt.Errorf("invalid account id %s", idStr)
-	}
-	account, err := s.store.GetAccountByID(id)
-	if err != nil {
-		return err
-	}
+	if r.Method == "GET" {
+		id, err := getID(r)
+		if err != nil {
+			return err
+		}
+		account, err := s.store.GetAccountByID(id)
+		if err != nil {
+			return err
+		}
 
-	return WriteJSON(w, http.StatusOK, account)
+		return WriteJSON(w, http.StatusOK, account)
+	}
+	if r.Method == "DELETE" {
+		return s.handleDeleteAccount(w, r)
+	}
+	return fmt.Errorf("unknown method %s", r.Method)
 }
 
 func (s *APIServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) error {
@@ -82,7 +84,15 @@ func (s *APIServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *APIServer) handleDeleteAccount(w http.ResponseWriter, r *http.Request) error {
-	return nil
+	id, err := getID(r)
+	if err != nil {
+		return err
+	}
+	if err := s.store.DeleteAccount(id); err != nil {
+		return err
+	}
+
+	return WriteJSON(w, http.StatusOK, map[string]string{"deleted": strconv.Itoa(id)})
 }
 
 func (s *APIServer) handleTransfer(w http.ResponseWriter, r *http.Request) error {
@@ -107,4 +117,14 @@ func makeHTTPHandleFunc(f apiFunc) http.HandlerFunc {
 			WriteJSON(w, http.StatusBadRequest, ApiError{Error: err.Error()})
 		}
 	}
+}
+
+func getID(r *http.Request) (int, error) {
+
+	idStr := mux.Vars(r)["id"]
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return id, fmt.Errorf("invalid account id %s", idStr)
+	}
+	return id, nil
 }

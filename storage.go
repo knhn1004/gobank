@@ -67,6 +67,16 @@ func (s *PostgresStore) CreateAccount(a *Account) error {
 }
 
 func (s *PostgresStore) DeleteAccount(id int) error {
+	// handle not found error
+	_, err := s.GetAccountByID(id)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec("DELETE FROM accounts WHERE id = $1", id)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
