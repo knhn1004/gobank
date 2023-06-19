@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 )
 
@@ -22,7 +25,7 @@ func NewAPIServer(listenAddr string, store Storage) *APIServer {
 func (s *APIServer) Run() {
 	router := mux.NewRouter()
 	router.HandleFunc("/account", makeHTTPHandleFunc(s.handleAccounts))
-	router.HandleFunc("/account/{id}", makeHTTPHandleFunc(s.handleAccountById))
+	router.HandleFunc("/account/{id}", withJWTAuth(makeHTTPHandleFunc(s.handleAccountById), s.store))
 	router.HandleFunc("/transfer", makeHTTPHandleFunc(s.handleTransfer))
 
 	log.Println("JSON API server listening on", s.listenAddr)
@@ -74,6 +77,14 @@ func (s *APIServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) 
 	}
 	account.ID = id
 
+	tokenString, err := createJWT(account)
+
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("token: ", tokenString)
+
 	return WriteJSON(w, http.StatusCreated, account)
 }
 
@@ -116,6 +127,60 @@ func WriteJSON(w http.ResponseWriter, status int, v any) error {
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(status)
 	return json.NewEncoder(w).Encode(v)
+}
+
+func permissionDenied(w http.ResponseWriter) {
+	WriteJSON(w, http.StatusForbidden, APIError{Error: "permission denied"})
+}
+
+func withJWTAuth(handlerFunc http.HandlerFunc, s Storage) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("withJWTAuth middleware")
+
+		tokenString := r.Header.Get("x-jwt-token")
+		token, err := validateJWT(tokenString)
+		if err != nil {
+			permissionDenied(w)
+			return
+		}
+		if !token.Valid {
+			permissionDenied(w)
+			return
+		}
+		claims := token.Claims.(jwt.MapClaims)
+
+		_, err = s.GetAccountByID(int(claims["id"].(float64)))
+		if err != nil {
+			permissionDenied(w)
+			return
+		}
+
+		handlerFunc(w, r)
+	}
+}
+
+func validateJWT(tokenString string) (*jwt.Token, error) {
+	secret := os.Getenv("JWT_SECRET")
+	return jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(secret), nil
+	})
+}
+
+func createJWT(account *Account) (string, error) {
+	key := os.Getenv("JWT_SECRET")
+	if key == "" {
+		return "", fmt.Errorf("JWT_SECRET env variable is not set")
+	}
+
+	t := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"id":  account.ID,
+		"exp": time.Now().Add(time.Hour * 24).Unix(),
+	})
+
+	return t.SignedString([]byte(key))
 }
 
 type apiFunc func(w http.ResponseWriter, r *http.Request) error
