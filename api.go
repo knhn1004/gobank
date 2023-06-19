@@ -22,8 +22,8 @@ func NewAPIServer(listenAddr string, store Storage) *APIServer {
 func (s *APIServer) Run() {
 	router := mux.NewRouter()
 	router.HandleFunc("/account", makeHTTPHandleFunc(s.handleAccounts))
-
 	router.HandleFunc("/account/{id}", makeHTTPHandleFunc(s.handleAccountById))
+	router.HandleFunc("/transfer", makeHTTPHandleFunc(s.handleTransfer))
 
 	log.Println("JSON API server listening on", s.listenAddr)
 
@@ -57,7 +57,8 @@ func (s *APIServer) handleAccountById(w http.ResponseWriter, r *http.Request) er
 	if r.Method == "DELETE" {
 		return s.handleDeleteAccount(w, r)
 	}
-	return fmt.Errorf("unknown method %s", r.Method)
+	//	return fmt.Errorf("unknown method %s", r.Method)
+	return WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown method"})
 }
 
 func (s *APIServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) error {
@@ -103,7 +104,12 @@ func (s *APIServer) handleDeleteAccount(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *APIServer) handleTransfer(w http.ResponseWriter, r *http.Request) error {
-	return nil
+	transferReq := new(TransferRequest)
+	if err := json.NewDecoder(r.Body).Decode(transferReq); err != nil {
+		return err
+	}
+	defer r.Body.Close()
+	return WriteJSON(w, http.StatusOK, transferReq)
 }
 
 func WriteJSON(w http.ResponseWriter, status int, v any) error {
@@ -114,14 +120,14 @@ func WriteJSON(w http.ResponseWriter, status int, v any) error {
 
 type apiFunc func(w http.ResponseWriter, r *http.Request) error
 
-type ApiError struct {
+type APIError struct {
 	Error string `json:"error"`
 }
 
 func makeHTTPHandleFunc(f apiFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := f(w, r); err != nil {
-			WriteJSON(w, http.StatusBadRequest, ApiError{Error: err.Error()})
+			WriteJSON(w, http.StatusBadRequest, APIError{Error: err.Error()})
 		}
 	}
 }
