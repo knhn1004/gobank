@@ -12,6 +12,7 @@ type Storage interface {
 	DeleteAccount(int) error
 	UpdateAccount(*Account) error
 	GetAccountByID(int) (*Account, error)
+	GetAccountByNumber(int) (*Account, error)
 	GetAccounts() ([]*Account, error)
 }
 
@@ -43,23 +44,23 @@ func (s *PostgresStore) CreateAccountTable() error {
     last_name TEXT,
     number SERIAL,
     balance BIGINT,
+    password TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`
 	_, err := s.db.Exec(query)
 	return err
-
 }
 
 func (s *PostgresStore) CreateAccount(a *Account) (int, error) {
 	query := `
 		INSERT INTO accounts 
-		(first_name, last_name, number, balance) 
+		(first_name, last_name, number, balance, password) 
 		VALUES 
-		($1, $2, $3, $4) RETURNING id`
+		($1, $2, $3, $4, $5) RETURNING id`
 
 	var id int // Variable to store the generated ID
 
-	err := s.db.QueryRow(query, a.FirstName, a.LastName, a.Number, a.Balance).Scan(&id)
+	err := s.db.QueryRow(query, a.FirstName, a.LastName, a.Number, a.Balance, a.EncryptedPassword).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -97,6 +98,18 @@ func (s *PostgresStore) GetAccountByID(id int) (*Account, error) {
 	return nil, fmt.Errorf("Account with id %d not found", id)
 }
 
+func (s *PostgresStore) GetAccountByNumber(number int) (*Account, error) {
+	rows, err := s.db.Query("SELECT * FROM accounts WHERE number = $1", number)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		return scanIntoAccount(rows)
+	}
+
+	return nil, fmt.Errorf("Account with number %d not found", number)
+}
+
 func (s *PostgresStore) GetAccounts() ([]*Account, error) {
 	rows, err := s.db.Query("SELECT * FROM accounts")
 	if err != nil {
@@ -112,6 +125,7 @@ func (s *PostgresStore) GetAccounts() ([]*Account, error) {
 			&account.LastName,
 			&account.Number,
 			&account.Balance,
+			&account.EncryptedPassword,
 			&account.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -133,6 +147,7 @@ func scanIntoAccount(rows *sql.Rows) (*Account, error) {
 		&account.LastName,
 		&account.Number,
 		&account.Balance,
+		&account.EncryptedPassword, // added this line
 		&account.CreatedAt)
 
 	return account, err
